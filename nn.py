@@ -10,29 +10,36 @@ import helpers as hp
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
-input_size = 1
-output_size = 64
+input_size = 2
+output_size = 16
 learning_rate = 0.01
 epochs = 32*32*8
 
 hidden_dim = 32
 theta_e_dim = 8
 theta_e_range = torch.arange(0, 2 * np.pi, 2 * np.pi / theta_e_dim)
+omega_e_dim = 8
+omega_e_max = 10.
+omega_e_range = torch.arange(-omega_e_max, omega_e_max, 2 * omega_e_max / omega_e_dim)
+total_dim = theta_e_dim*omega_e_dim
 
 Ts = 10e-4
 a = 0.27198
 b = 0.5055
-omega_e = 10.
 Omega = 0.144
 
-labels = torch.zeros(theta_e_dim, output_size)
-
-for i, theta_e0 in enumerate(theta_e_range):
-    a_pll = pll.PLL(Ts, a, b, omega_e, Omega,
+inputs = torch.zeros(total_dim, 2)
+labels = torch.zeros(total_dim, output_size)
+initial_condition = torch.zeros(total_dim, output_size)
+for i_theta, theta_e0 in enumerate(theta_e_range):
+    for i_omega, omega_e in enumerate(omega_e_range):
+        total_i = i_theta*theta_e_dim + i_omega
+        a_pll = pll.PLL(Ts, a, b, omega_e, Omega,
                     0., theta_e0)
-    x_k, thetha_e_k = a_pll.steps(output_size)
-    labels[i] = thetha_e_k
-
+        x_k, theta_e_k = a_pll.steps(output_size)
+        labels[total_i] = theta_e_k
+        inputs[total_i] = torch.tensor([theta_e0, omega_e])
+        initial_condition[total_i] += theta_e0
 
 # Neural network model
 class NeuralPLLModel(nn.Module):
@@ -50,10 +57,16 @@ class NeuralPLLModel(nn.Module):
         out = self.model(x)
         return out
 
-    def training_step(self, theta_e0_batch, labels):
-        out = self(theta_e0_batch)
+    def training_step(self, batch, labels):
+        out = self(batch)
+        out = out + initial_condition
         loss_fn = nn.MSELoss()
         return loss_fn(out, labels)
+
+    def eval(self, theta_e0, omega_e):
+        input = torch.tensor([theta_e0, omega_e]).view(1, 2)
+        out = self(input)[0].detach()
+        return out
 
 def fit(epochs,
         learning_rate,
@@ -65,9 +78,7 @@ def fit(epochs,
     for it in range(epochs):
         hp.print_progress(epochs, it)
 
-        input_batch = theta_e_range.view(-1, 1)
-
-        loss = model.training_step(input_batch, labels)
+        loss = model.training_step(inputs, labels)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -75,7 +86,6 @@ def fit(epochs,
         losses.append(loss.item())
 
     return losses
-
 
 # generate data and data loaders
 
@@ -89,23 +99,19 @@ ax1[0].set_title('Theta_e_k (thetha_e0 = 0)')
 ax1[0].set_xlabel('k')
 ax1[0].plot(labels[0])
 
-nn_theta_e_k = model(theta_e_range[1].view(1, 1)).detach().flatten()
 ax1[1].set_title('NN vs real')
-ax1[1].plot(labels[1])
-ax1[1].plot(nn_theta_e_k, color='r')
+ax1[1].plot(labels[0])
 
-nn_theta_e_k = model(theta_e_range[2].view(1, 1)).detach().flatten()
 ax2[1].set_title('NN vs real')
-ax2[1].plot(labels[2])
-ax2[1].plot(nn_theta_e_k, color='r')
+ax2[1].plot(labels[1])
 
 print('Train NN')
 losses = fit(epochs, learning_rate, model)
 
-nn_theta_e_k = model(theta_e_range[1].view(1, 1)).detach().flatten()
+nn_theta_e_k = model.eval(theta_e_range[0], omega_e_range[0])
 ax1[1].plot(nn_theta_e_k, color='g')
 
-nn_theta_e_k = model(theta_e_range[2].view(1, 1)).detach().flatten()
+nn_theta_e_k = model.eval(theta_e_range[0], omega_e_range[1])
 ax2[1].plot(nn_theta_e_k, color='g')
 
 ax2[0].set_title('Training losses')
