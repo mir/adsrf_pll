@@ -7,13 +7,14 @@ import numpy as np
 import os
 import pll
 import helpers as hp
+import random
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 input_size = 2
-output_size = 16
+output_size = 64
 learning_rate = 0.01
-epochs = 32*32*8
+epochs = 32*32*32
 
 hidden_dim = 32
 theta_e_dim = 8
@@ -59,13 +60,15 @@ class NeuralPLLModel(nn.Module):
 
     def training_step(self, batch, labels):
         out = self(batch)
-        out = out + initial_condition
+        # out = out + initial_condition
         loss_fn = nn.MSELoss()
         return loss_fn(out, labels)
 
     def eval(self, theta_e0, omega_e):
-        input = torch.tensor([theta_e0, omega_e]).view(1, 2)
-        out = self(input)[0].detach()
+        input = torch.tensor([theta_e0, omega_e]).view(1, input_size)
+        out = self(input)
+        out = out[0].detach()
+        # out = out + theta_e0
         return out
 
 def fit(epochs,
@@ -99,20 +102,22 @@ ax1[0].set_title('Theta_e_k (thetha_e0 = 0)')
 ax1[0].set_xlabel('k')
 ax1[0].plot(labels[0])
 
-ax1[1].set_title('NN vs real')
-ax1[1].plot(labels[0])
-
-ax2[1].set_title('NN vs real')
-ax2[1].plot(labels[1])
-
 print('Train NN')
 losses = fit(epochs, learning_rate, model)
 
-nn_theta_e_k = model.eval(theta_e_range[0], omega_e_range[0])
-ax1[1].plot(nn_theta_e_k, color='g')
+def plot_random_nn_vs_real(axe):
+    omega_e = random.random() * 2 * omega_e_max - omega_e_max
+    theta_e0 = random.random() * 2 * np.pi
+    axe.set_title('NN vs real')
+    test_pll = pll.PLL(Ts, a, b, omega_e, Omega,
+                       0., theta_e0)
+    x_k, theta_e_k = test_pll.steps(output_size)
+    axe.plot(theta_e_k)
+    nn_theta_e_k = model.eval(theta_e0, omega_e)
+    axe.plot(nn_theta_e_k, color='g')
 
-nn_theta_e_k = model.eval(theta_e_range[0], omega_e_range[1])
-ax2[1].plot(nn_theta_e_k, color='g')
+plot_random_nn_vs_real(ax1[1])
+plot_random_nn_vs_real(ax2[1])
 
 ax2[0].set_title('Training losses')
 ax2[0].set_ylabel('Loss')
